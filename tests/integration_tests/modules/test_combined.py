@@ -21,8 +21,11 @@ from cloudinit import lifecycle
 from cloudinit.util import is_true
 from tests.integration_tests.decorators import retry
 from tests.integration_tests.instances import IntegrationInstance
-from tests.integration_tests.integration_settings import PLATFORM
-from tests.integration_tests.releases import CURRENT_RELEASE, IS_UBUNTU, MANTIC
+from tests.integration_tests.integration_settings import (
+    OS_IMAGE_TYPE,
+    PLATFORM,
+)
+from tests.integration_tests.releases import CURRENT_RELEASE, IS_UBUNTU, JAMMY
 from tests.integration_tests.util import (
     get_feature_flag_value,
     get_inactive_modules,
@@ -95,7 +98,7 @@ class TestCombined:
         Test that netplan config file is generated with proper permissions
         """
         log = class_client.read_from_file("/var/log/cloud-init.log")
-        if CURRENT_RELEASE < MANTIC:
+        if CURRENT_RELEASE < JAMMY:
             assert (
                 "No netplan python module. Fallback to write"
                 " /etc/netplan/50-cloud-init.yaml" in log
@@ -183,14 +186,16 @@ class TestCombined:
         assert "LANG=en_GB.UTF-8" in default_locale
 
         locale_a = client.execute("locale -a")
-        verify_ordered_items_in_text(["en_GB.utf8", "en_US.utf8"], locale_a)
-
-        locale_gen = client.execute(
-            "cat /etc/locale.gen | grep -v '^#' | uniq"
-        )
-        verify_ordered_items_in_text(
-            ["en_GB.UTF-8", "en_US.UTF-8"], locale_gen
-        )
+        locale_gen = client.execute("grep -v '^#' /etc/locale.gen | uniq")
+        if OS_IMAGE_TYPE == "minimal":
+            # Minimal images don't have a en_US.utf8 locale
+            expected_locales = ["C.utf8", "en_GB.utf8"]
+            expected_locale_gen = ["en_GB.UTF-8", "UTF-8"]
+        else:
+            expected_locales = ["en_GB.utf8", "en_US.utf8"]
+            expected_locale_gen = ["en_GB.UTF-8", "en_US.UTF-8"]
+        verify_ordered_items_in_text(expected_locales, locale_a)
+        verify_ordered_items_in_text(expected_locale_gen, locale_gen)
 
     def test_random_seed_data(self, class_client: IntegrationInstance):
         """Integration test for the random seed module.
@@ -514,7 +519,7 @@ class TestCombined:
         # attributes
         assert isinstance(client.instance, GceInstance)
         assert v1_data["availability_zone"] == client.instance.zone
-        assert v1_data["instance_id"] == client.instance.instance_id
+        assert v1_data["instance_id"] == client.instance.id
         assert v1_data["local_hostname"] == client.instance.name
 
     @pytest.mark.skipif(
