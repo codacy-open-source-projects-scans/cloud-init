@@ -126,7 +126,8 @@ def verify_clean_boot(
             maybe_list = [value]
         return maybe_list
 
-    traceback_texts = []
+    if ignore_tracebacks is None:
+        ignore_tracebacks = []
     # Define exceptions by matrix of platform and Ubuntu release
     if "azure" == PLATFORM:
         # Consistently on all Azure launches:
@@ -147,17 +148,19 @@ def verify_clean_boot(
         ignore_errors = append_or_create_list(
             ignore_warnings, "Stderr: RTNETLINK answers: File exists"
         )
-        traceback_texts.append("Stderr: RTNETLINK answers: File exists")
+        if isinstance(ignore_tracebacks, list):
+            ignore_tracebacks.append("Stderr: RTNETLINK answers: File exists")
         # LP: #1833446
         ignore_warnings = append_or_create_list(
             ignore_warnings,
             "UrlError: 404 Client Error: Not Found for url: "
             "http://169.254.169.254/latest/meta-data/",
         )
-        traceback_texts.append(
-            "UrlError: 404 Client Error: Not Found for url: "
-            "http://169.254.169.254/latest/meta-data/"
-        )
+        if isinstance(ignore_tracebacks, list):
+            ignore_tracebacks.append(
+                "UrlError: 404 Client Error: Not Found for url: "
+                "http://169.254.169.254/latest/meta-data/"
+            )
         # Oracle has a file in /etc/cloud/cloud.cfg.d that contains
         # users:
         # - default
@@ -168,7 +171,7 @@ def verify_clean_boot(
             ignore_warnings,
             "Unable to disable SSH logins for opc given ssh_redirect_user",
         )
-
+    # Preserve platform-specific tracebacks expected
     _verify_clean_boot(
         instance,
         ignore_deprecations=ignore_deprecations,
@@ -538,10 +541,20 @@ def get_console_log(client: "IntegrationInstance"):
         console_log = client.instance.console_log()
     except NotImplementedError:
         pytest.skip("NotImplementedError when requesting console log")
+    except RuntimeError as e:
+        if "open : no such file or directory" in str(e):
+            if hasattr(client, "lxc_log"):
+                return client.lxc_log
+        raise e
     if console_log is None:
         pytest.skip("Console log has not been setup")
     if console_log.lower().startswith("no console output"):
         pytest.fail("no console output")
+    if PLATFORM in ("lxd_vm", "lxd_container"):
+        # Preserve non empty console log on lxc platforms because
+        # lxc console --show-log can be called once and the log is flushed.
+        # Multiple calls to --show-log error on "no such file or directory".
+        client.lxc_log = console_log  # type: ignore[attr-defined]
     return console_log
 
 
